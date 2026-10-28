@@ -1,0 +1,8 @@
+requirement_id,asil,test_case_id,test_function,status
+SG_AEB_01,D,TC_AEB_001,test_req_aeb_approach_and_brake_scenario,PASS
+TSR_AEB_01a,D,TC_AEB_002,test_tc_hil_005_multi_step_sequence_preserves_order,PASS
+TSR_AEB_01b,D,TC_AEB_001,test_req_aeb_approach_and_brake_scenario,PASS
+TSR_AEB_02a,B,TC_AEB_003,test_aeb_002_fcw_only_closing_not_critical,PASS
+FSR_AEB_03,D,TC_AEB_004,test_aeb_006_false_positive_same_direction_no_closing,PASS
+SG_AEB_02,D,TC_AEB_005,test_tc_dtc_002_speed_above_max,PASS
+TSR_AEB_03a,B(D),,,UNCOVERED

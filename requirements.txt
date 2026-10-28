@@ -1,0 +1,11 @@
+# Phase 5 consolidates phase3 (HIL harness) + phase4 (traceability gate).
+# The canonical install is `pip install -e ".[test]"` (see pyproject.toml);
+# this file pins the same set for a plain `pip install -r requirements.txt`.
+
+# Runtime (phase3 CAN deps)
+python-can==4.6.1
+cantools==45.0.0
+
+# Testing
+pytest==9.1.1
+pytest-cov==7.0.0

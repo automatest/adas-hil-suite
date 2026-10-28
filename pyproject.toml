@@ -1,0 +1,37 @@
+[project]
+name = "adas-hil-suite"
+version = "0.1.0"
+description = "Consolidated ADAS HIL test suite (phase3 harness + phase4 traceability gate) with a tiered CI/CD pipeline."
+requires-python = ">=3.11"
+dependencies = [
+    "python-can",
+    "cantools",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-cov",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+# TestStep/TestResult are dataclasses, not test classes — only collect
+# explicit *Case classes so pytest doesn't warn on them.
+python_classes = ["Test*Case"]
+python_functions = ["test_*"]
+markers = [
+    "stub: runs against the software StubBus (cloud runner, every PR)",
+    "bench: requires real HIL hardware (self-hosted runner, scheduled)",
+    "smoke: fast subset for per-PR gating",
+    "regression: full suite for nightly runs",
+]
+addopts = "-ra --tb=short"

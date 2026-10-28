@@ -1,0 +1,166 @@
+# ADAS test suite — tiered CI/CD pipeline (Exercises 20 -> 23, final form).
+#
+# Three tiers, split by pytest marker so the division is enforced by code, not
+# convention (see pyproject.toml and conftest.py):
+#
+#   pr-gate            every PR / push, across a Python-version matrix.
+#                      Runs the fast `smoke and stub` subset + the blocking
+#                      traceability gate + the coverage comment. This is the
+#                      merge gate.
+#   nightly-regression scheduled (nightly). Runs the FULL `stub` suite +
+#                      coverage report, off the PR critical path.
+#   bench              self-hosted runner wired to real HIL hardware. Runs the
+#                      `bench` tier. Disabled (`if: false`) in this practice
+#                      repo — real hardware can't run on a cloud runner.
+#
+# Why tiered: cost, speed, and hardware. Software-stub tests run anywhere and
+# gate every PR; the full regression is heavier so it runs nightly; the HIL
+# bench tests need a physical ECU over CAN and so run only on a self-hosted
+# runner on a slower cadence. See README.md.
+name: ADAS Test Suite
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 3 * * *" # nightly full regression at 03:00 UTC
+  workflow_dispatch:
+
+# dorny/test-reporter needs `checks: write`; the sticky PR comment needs
+# `pull-requests: write`.
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Fast merge gate — every PR and push, across supported Python versions.
+  # ---------------------------------------------------------------------------
+  pr-gate:
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false # one version failing still reports the others
+      matrix:
+        python: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "${{ matrix.python }}"
+
+      - name: Install
+        run: pip install -e ".[test]"
+
+      - name: Run fast cloud-safe subset
+        # Fast per-PR subset: smoke + stub only. bench tests are skipped by the
+        # conftest fixture (no hardware), so they neither run nor fail here.
+        run: pytest -m "smoke and stub" -v --junitxml=results.xml --cov=src --cov-report=xml
+
+      - name: Traceability release gate
+        # Fails the job (exit 1) if any ASIL C/D/B(D) requirement is uncovered
+        # or any linked test failed, with ::error:: annotations naming the IDs.
+        # Runs inside the PR gate, so a coverage gap blocks merge on every PR.
+        run: python -m src.trace_check traceability/trace_matrix.csv results.xml
+
+      - name: Publish JUnit results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: "junit-${{ matrix.python }}"
+          path: results.xml
+
+      - name: Test summary
+        uses: dorny/test-reporter@v2
+        if: always()
+        with:
+          name: "pytest (${{ matrix.python }})"
+          path: results.xml
+          reporter: java-junit
+
+      - name: Coverage report
+        if: always()
+        run: python -m src.coverage_report traceability/trace_matrix.csv > coverage.md
+
+      - name: Comment coverage on PR
+        # Only the primary matrix version comments, so the three matrix legs
+        # don't post three competing sticky comments.
+        if: github.event_name == 'pull_request' && matrix.python == '3.13' && always()
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          path: coverage.md
+
+  # ---------------------------------------------------------------------------
+  # Full regression — nightly only, off the PR critical path.
+  # ---------------------------------------------------------------------------
+  nightly-regression:
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install
+        run: pip install -e ".[test]"
+
+      - name: Run full stub regression
+        # Full stub suite (not just smoke) — heavier, so nightly rather than
+        # per-PR.
+        run: pytest -m "stub" -v --junitxml=results.xml --cov=src --cov-report=xml
+
+      - name: Traceability release gate
+        run: python -m src.trace_check traceability/trace_matrix.csv results.xml
+
+      - name: Coverage report
+        if: always()
+        run: python -m src.coverage_report traceability/trace_matrix.csv > coverage.md
+
+      - name: Upload nightly results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nightly-results
+          path: |
+            results.xml
+            coverage.md
+
+  # ---------------------------------------------------------------------------
+  # Real HIL bench — self-hosted runner wired to hardware (conceptual).
+  # ---------------------------------------------------------------------------
+  # Disabled in this practice repo: there is no physical ECU, and a cloud
+  # runner cannot talk to one. To enable on a real bench:
+  #   1. Register a self-hosted runner on the bench machine (wired to the ECU
+  #      over CAN) with the labels `self-hosted` and `hil-bench`, and export
+  #      HIL_BENCH=1 on it so the conftest fixture stops skipping bench tests.
+  #   2. Replace `if: false` with a real trigger, e.g.
+  #        if: github.event_name == 'schedule'
+  #      or gate it on a `bench` PR label.
+  # The same injectable BusInterface from Phase 3 means these bench tests use a
+  # real python-can backend while the stub tests use StubBus — identical test
+  # sequences, different bus.
+  bench:
+    if: false
+    runs-on: [self-hosted, hil-bench]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install
+        run: pip install -e ".[test]"
+
+      - name: Run HIL bench tests
+        # Talks to a real ECU over CAN. HIL_BENCH=1 on the runner makes the
+        # conftest fixture provide the real bus instead of skipping.
+        run: pytest -m "bench" -v --junitxml=bench-results.xml
+
+      - name: Upload bench results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-results
+          path: bench-results.xml
